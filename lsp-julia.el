@@ -28,16 +28,30 @@
   :group 'lsp-julia)
 
 (defun lsp-julia--get-root ()
-  "Try to find the package directory by searching for a .gitignore file.
+  "Try to find the package directory by searching for a Project.toml file.
 If no .gitignore file can be found use the default directory "
-  (let ((dir (locate-dominating-file default-directory ".gitignore")))
-    (if dir
-        (expand-file-name dir)
-      default-directory)))
 
-(defun lsp-julia--rls-command ()
-  `(,lsp-julia-command ,@lsp-julia-flags "-e using LanguageServer; server = LanguageServer.LanguageServerInstance(STDIN, STDOUT, false); server.runlinter = true; run(server);"))
+  (let ((dir (locate-dominating-file default-directory "Project.toml")))
+    (if dir (expand-file-name dir)
+      (expand-file-name lsp-julia-default-environment))))
 
+
+
+(defvar lsp-julia-debug t
+  "debug mode")
+
+(defun lsp-julia--command ()
+  `(,lsp-julia-command
+    ,@lsp-julia-flags
+    ,(concat "-e using LanguageServer, Sockets, SymbolServer;"
+             " server = LanguageServer.LanguageServerInstance("
+             " stdin, stdout, "
+             (if lsp-julia-debug "true" "false")
+             ","
+             " \"" (lsp-julia--get-root) "\","
+             " \"\", Dict());"
+             " server.runlinter = false;"
+             " run(server);")))
 
 (defconst lsp-julia--handlers
   '(("window/setStatusBusy" .
@@ -45,13 +59,28 @@ If no .gitignore file can be found use the default directory "
     ("window/setStatusReady" .
      (lambda(w _p)))))
 
+(defcustom lsp-julia-default-environment "~/.julia/environments/v1.0"
+  "The path to the default environment."
+  :type 'string
+  :group 'lsp-julia)
+
+(defun lsp-julia--get-root ()
+  (let ((dir (locate-dominating-file default-directory "Project.toml")))
+    (if dir (expand-file-name dir)
+      (expand-file-name lsp-julia-default-environment))))
+
+
 (defun lsp-julia--initialize-client(client)
   (mapcar #'(lambda (p) (lsp-client-on-notification client (car p) (cdr p))) lsp-julia--handlers)
   (setq-local lsp-response-timeout lsp-julia-timeout))
 
-(lsp-define-stdio-client lsp-julia "julia" #'lsp-julia--get-root nil
-                         :command-fn #'lsp-julia--rls-command
-                         :initialize #'lsp-julia--initialize-client)
+
+(lsp-register-client
+ (make-lsp-client
+  :new-connection (lsp-stdio-connection 'lsp-julia--command)
+  :major-modes '(julia-mode)
+  :server-id 'ls.jl
+  :initialization-options 'lsp-julia--rls-flags))
 
 (provide 'lsp-julia)
 ;;; lsp-julia.el ends here
